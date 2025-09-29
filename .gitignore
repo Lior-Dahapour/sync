@@ -1,0 +1,49 @@
+# Compiled object files
+*.o
+*.obj
+
+# Compiled static & dynamic libraries
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+
+# Executables
+*.exe
+*.out
+*.app
+a.out
+
+# Debug files
+*.dSYM/
+*.dwo
+*.su
+*.idb
+*.pdb
+
+# Build directories
+/build/
+/bin/
+/Debug/
+/Release/
+/cmake-build-*/
+
+# Generated files
+Makefile~
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# Editor backups and temporary files
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
+*.log
+
+# IDE files (optional)
+.vscode/
+.idea/
+*.code-workspace
