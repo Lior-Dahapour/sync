@@ -13,6 +13,6 @@ typedef struct
 int parker_init(parker_t *parker);
 int park(parker_t *parker);
 int unpark(parker_t *parker);
-int parker_destroy(parker_t *parker);
+void parker_destroy(parker_t *parker);
 
 #endif

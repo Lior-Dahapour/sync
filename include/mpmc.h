@@ -5,7 +5,7 @@
 #include "parker.h"
 typedef enum
 {
-    MPMC_OK = 1,
+    MPMC_OK = 0,
     MPMC_FULL = -1,
     MPMC_EMPTY = -2,
     MPMC_INIT_FAILED = -3,
@@ -65,7 +65,37 @@ int mpmc_send(mpmc_t *queue, void *message);
  * @return MPMC_OK on success, MPMC_INIT_FAILED on allocation failure.
  */
 int mpmc_init(mpmc_t *queue, int capacity, int item_size);
+/**
+ * @brief Enqueues a message into the MPMC queue.
+ *
+ * This function will block the calling thread if the queue is full,
+ * until space becomes available. It uses a parker internally to
+ * efficiently wait without busy-waiting.
+ *
+ * @param queue Pointer to an initialized MPMC queue.
+ * @param message Pointer to the message to enqueue. Must be at least
+ *                queue->item_size bytes.
+ * @return int Returns MPMC_OK  on success.
+ *
+ * @note Thread-safe: can be called concurrently by multiple producers.
+ *       Never returns MPMC_FULL because it blocks until space is available.
+ */
 int mpmc_send_block(mpmc_t *queue, void *message);
+/**
+ * @brief Dequeues a message from the MPMC queue.
+ *
+ * This function will block the calling thread if the queue is empty,
+ * until a message becomes available. It uses a parker internally to
+ * efficiently wait without busy-waiting.
+ *
+ * @param queue Pointer to an initialized MPMC queue.
+ * @param message Pointer to the buffer to store the dequeued message.
+ *                Must be at least queue->item_size bytes.
+ * @return int Returns MPMC_OK (0) on success.
+ *
+ * @note Thread-safe: can be called concurrently by multiple consumers.
+ *       Never returns MPMC_EMPTY because it blocks until a message is available.
+ */
 int mpmc_recv_block(mpmc_t *queue, void *message);
 void destroy_mpmc(mpmc_t *queue);
 #endif

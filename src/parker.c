@@ -1,6 +1,5 @@
 #include "parker.h"
 #include "pthread.h"
-
 int parker_init(parker_t *parker)
 {
     atomic_store(&parker->state, 0);
@@ -28,4 +27,9 @@ int unpark(parker_t *parker)
     pthread_cond_signal(&parker->condvar);
     pthread_mutex_unlock(&parker->mutex);
     return 0;
+}
+void parker_destroy(parker_t *parker)
+{
+    pthread_mutex_destroy(&parker->mutex);
+    pthread_cond_destroy(&parker->condvar);
 }

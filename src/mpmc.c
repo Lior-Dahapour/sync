@@ -4,6 +4,7 @@
 #include <libc.h>
 #include "mpmc.h"
 #include "parker.h"
+
 static inline mpmc_cell_t *mpmc_get_cell(mpmc_t *queue, size_t i)
 {
 
@@ -127,6 +128,6 @@ int mpmc_recv_block(mpmc_t *queue, void *message)
 void destroy_mpmc(mpmc_t *queue)
 {
     free(queue->buffer);
-    atomic_store(&queue->tail, 0);
-    atomic_store(&queue->head, 0);
+    parker_destroy(&queue->recv_parker);
+    parker_destroy(&queue->send_parker);
 }
