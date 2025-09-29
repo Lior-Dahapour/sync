@@ -1,8 +1,8 @@
-#ifndef MPMC_H
-#define MPMC_H
+#ifndef MPMC
+#define MPMC
 
 #include <stdatomic.h>
-
+#include "parker.h"
 typedef enum
 {
     MPMC_OK = 1,
@@ -19,12 +19,12 @@ typedef struct
 typedef struct
 {
     mpmc_cell_t *buffer;
-    /// @brief  where message is pushed
     atomic_size_t tail;
-    /// @brief when message is removed
     atomic_size_t head;
     size_t item_size;
     int capacity;
+    parker_t recv_parker;
+    parker_t send_parker;
 } mpmc_t;
 /**
  * @brief Receive a message from the MPMC queue (non-blocking).
@@ -65,4 +65,7 @@ int mpmc_send(mpmc_t *queue, void *message);
  * @return MPMC_OK on success, MPMC_INIT_FAILED on allocation failure.
  */
 int mpmc_init(mpmc_t *queue, int capacity, int item_size);
+int mpmc_send_block(mpmc_t *queue, void *message);
+int mpmc_recv_block(mpmc_t *queue, void *message);
+void destroy_mpmc(mpmc_t *queue);
 #endif

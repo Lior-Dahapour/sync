@@ -1,10 +1,9 @@
 
-#include "stdatomic.h"
-#include "stdlib.h"
-#include "libc.h"
-
+#include <stdatomic.h>
+#include <stdlib.h>
+#include <libc.h>
 #include "mpmc.h"
-
+#include "parker.h"
 static inline mpmc_cell_t *mpmc_get_cell(mpmc_t *queue, size_t i)
 {
 
@@ -12,36 +11,31 @@ static inline mpmc_cell_t *mpmc_get_cell(mpmc_t *queue, size_t i)
     return (mpmc_cell_t *)(queue->buffer + i * cell_size);
 }
 
-/// @brief init a new mpmc channel
-/// @param capacity the amount if items the channel can hold without recv before its full
-/// @param item_size the size of the item the channel expceting
-/// @return
 int mpmc_init(mpmc_t *queue, int capacity, int item_size)
 {
-    // alloc the inner channel buffer
-    void *inner = malloc(capacity * (item_size + sizeof(atomic_size_t)));
+    queue->buffer = malloc(capacity * (sizeof(mpmc_cell_t) + item_size));
 
-    if (inner == NULL)
+    if (queue->buffer == NULL)
     {
         return MPMC_INIT_FAILED;
     }
 
     queue->capacity = capacity;
-    queue->buffer = inner;
     queue->item_size = item_size;
     atomic_store(&queue->head, 0);
     atomic_store(&queue->tail, 0);
     for (size_t i = 0; i < capacity; i++)
     {
-        // atomic_store(&queue->buffer[i].stamp, i);
+        // get the cell
+        mpmc_cell_t *cell = mpmc_get_cell(queue, i);
+        // init the seq
+        atomic_store(&cell->seq, i);
     }
+    parker_init(&queue->send_parker);
+    parker_init(&queue->recv_parker);
 
-    return 0;
+    return MPMC_OK;
 }
-
-/// @brief send a message to the channel \r\n this function is non blocking , if the channel is full
-/// @param queue the  channel
-/// @param message the message to the channel, this copy the message to the channel buffer , if the message live in the heap you must free the memory manully
 
 int mpmc_send(mpmc_t *queue, void *message)
 {
@@ -56,8 +50,9 @@ int mpmc_send(mpmc_t *queue, void *message)
         {
             if (atomic_compare_exchange_weak(&queue->tail, &tail, tail + 1))
             {
-                memcpy(&cell->data, message, queue->item_size);
+                memcpy(cell->data, message, queue->item_size);
                 atomic_store(&cell->seq, tail + 1);
+                unpark(&queue->recv_parker);
                 return MPMC_OK;
             }
             else
@@ -87,8 +82,9 @@ int mpmc_recv(mpmc_t *queue, void *message)
         {
             if (atomic_compare_exchange_weak(&queue->head, &head, head + 1))
             {
-                memcpy(message, &cell->data, queue->item_size);
-                atomic_store(&cell->seq, head + 1);
+                memcpy(message, cell->data, queue->item_size);
+                atomic_store(&cell->seq, head + queue->capacity);
+                unpark(&queue->send_parker);
                 return MPMC_OK;
             }
             else
@@ -103,4 +99,34 @@ int mpmc_recv(mpmc_t *queue, void *message)
             return MPMC_EMPTY;
         }
     }
+}
+int mpmc_send_block(mpmc_t *queue, void *message)
+{
+    while (1)
+    {
+        if (mpmc_send(queue, message) == MPMC_FULL)
+        {
+            park(&queue->send_parker);
+            continue;
+        }
+        return MPMC_OK;
+    }
+}
+int mpmc_recv_block(mpmc_t *queue, void *message)
+{
+    while (1)
+    {
+        if (mpmc_recv(queue, message) == MPMC_EMPTY)
+        {
+            park(&queue->recv_parker);
+            continue;
+        }
+        return MPMC_OK;
+    }
+}
+void destroy_mpmc(mpmc_t *queue)
+{
+    free(queue->buffer);
+    atomic_store(&queue->tail, 0);
+    atomic_store(&queue->head, 0);
 }
