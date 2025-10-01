@@ -4,7 +4,8 @@
 #include <libc.h>
 #include "mpmc.h"
 #include "parker.h"
-
+#include "spin.h"
+#define QUAD_SPIN ((spin_t){.next = 1, .pow = 2, .max = 4})
 static inline mpmc_cell_t *mpmc_get_cell(mpmc_t *queue, size_t i)
 {
 
@@ -42,6 +43,7 @@ int mpmc_send(mpmc_t *queue, void *message)
 {
     size_t tail;
     size_t seq;
+    spin_t spin = QUAD_SPIN;
     while (1)
     {
         tail = atomic_load(&queue->tail);
@@ -58,7 +60,7 @@ int mpmc_send(mpmc_t *queue, void *message)
             }
             else
             {
-                // CAS failed
+                spin_next(&spin);
                 continue;
             }
         }
@@ -74,6 +76,7 @@ int mpmc_recv(mpmc_t *queue, void *message)
 {
     size_t head;
     size_t seq;
+    spin_t spin = QUAD_SPIN;
     while (1)
     {
         head = atomic_load(&queue->head);
@@ -90,6 +93,7 @@ int mpmc_recv(mpmc_t *queue, void *message)
             }
             else
             {
+                spin_next(&spin);
                 // CAS failed
                 continue;
             }

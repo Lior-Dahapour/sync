@@ -1,5 +1,5 @@
-#ifndef PARKER
-#define PARKER
+#ifndef PARKER_H
+#define PARKER_H
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -10,9 +10,35 @@ typedef struct
     pthread_mutex_t mutex;
 
 } parker_t;
-int parker_init(parker_t *parker);
-int park(parker_t *parker);
-int unpark(parker_t *parker);
-void parker_destroy(parker_t *parker);
+static inline void parker_init(parker_t *parker)
+{
+    atomic_store(&parker->state, 0);
+    pthread_mutex_init(&parker->mutex, NULL);
+    pthread_cond_init(&parker->condvar, NULL);
+}
+
+static inline void park(parker_t *parker)
+{
+    pthread_mutex_lock(&parker->mutex);
+    while (atomic_load(&parker->state) == 0)
+    {
+        pthread_cond_wait(&parker->condvar, &parker->mutex);
+    }
+    atomic_store(&parker->state, 0);
+    pthread_mutex_unlock(&parker->mutex);
+}
+
+static inline void unpark(parker_t *parker)
+{
+    pthread_mutex_lock(&parker->mutex);
+    atomic_store(&parker->state, 1);
+    pthread_cond_signal(&parker->condvar);
+    pthread_mutex_unlock(&parker->mutex);
+}
+static inline void parker_destroy(parker_t *parker)
+{
+    pthread_mutex_destroy(&parker->mutex);
+    pthread_cond_destroy(&parker->condvar);
+}
 
 #endif

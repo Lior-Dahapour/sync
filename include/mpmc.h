@@ -1,5 +1,5 @@
-#ifndef MPMC
-#define MPMC
+#ifndef MPMC_H
+#define MPMC_H
 
 #include <stdatomic.h>
 #include "parker.h"
