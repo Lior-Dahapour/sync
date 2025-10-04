@@ -2,98 +2,180 @@
 #define SEMAPHORE_H
 
 #include <stdatomic.h>
+#include <pthread.h>
 #include "parker.h"
+#include "aqueue.h"
 
-/// @brief Node representing a single thread waiting on the semaphore
-typedef struct semaphore_node_t semaphore_node_t;
-struct semaphore_node_t
-{
-    /// @brief Parker used to park/unpark a thread
-    parker_t parker;
+/**
+ * @file semaphore.h
+ * @brief A simple counting semaphore implementation supporting both
+ *        blocking and non-blocking acquisition.
+ *
+ * This semaphore manages a fixed number of "permits" that control
+ * concurrent access to a shared resource. Threads may:
+ *
+ *   - Acquire one or more permits (blocking or non-blocking).
+ *   - Release permits back, potentially waking blocked waiters.
+ *
+ *
+ * Internally, it uses a FIFO queue for fair acquiring.
+ */
 
-    /// @brief Pointer to the next waiting node in the queue
-    _Atomic(semaphore_node_t *) next;
-};
+/// Forward declarations
+typedef struct semaphore_waiter semaphore_waiter_t;
+typedef struct semaphore_node semaphore_node_t;
 
-/// @brief Lock-free queue of waiting threads for the semaphore
+/**
+ * @brief Counting semaphore structure.
+ *
+ * Fields:
+ *
+ *  - `permits`   : Atomic counter of available permits.
+ *
+ *  - `capacity`  : Maximum number of permits allowed.
+ *
+ *  - `head/tail` : Linked list of waiting threads.
+ *
+ *  - `queue_mutex`: Protects waiter queue operations.
+ */
 typedef struct
 {
-    /// @brief Head of the waiting queue
-    _Atomic(semaphore_node_t *) head;
-
-    /// @brief Tail of the waiting queue
-    _Atomic(semaphore_node_t *) tail;
-} semaphore_queue_t;
-
-/// @brief A semaphore is a synchronization primitive used to control access
-///        to a shared resource by multiple threads. It works like a counter
-///        of available "permits":
-///
-///        - Threads acquire a permit before accessing the resource.
-///        - Threads release the permit after finishing.
-///
-///        Semaphores can be used to limit concurrent access to resources like
-///        printers, database connections, or any limited system resource.
-///
-///        This implementation supports both non-blocking and blocking
-///        acquisition of permits.
-typedef struct
-{
-    /// @brief Maximum number of permits available
+    /// @brief Maximum number of permits the semaphore can hold.
     size_t capacity;
 
-    /// @brief Queue of waiting threads
-    semaphore_queue_t queue;
+    /// @brief Head of the waiter queue.
+    semaphore_node_t *head;
 
-    /// @brief Current number of available permits
+    /// @brief Tail of the waiter queue.
+    semaphore_node_t *tail;
+
+    /// @brief Mutex guarding access to the waiter queue.
+    pthread_mutex_t queue_mutex;
+
+    /// @brief Current number of available permits.
     atomic_size_t permits;
 
 } semaphore_t;
 
-/// @brief Return codes for semaphore operations
+/**
+ * @brief Result codes returned by semaphore operations.
+ */
 typedef enum
 {
-    /// @brief The operation succeeded without waking any thread
+    /// @brief Operation succeeded.
     SEMAPHORE_OK = 0,
 
-    /// @brief A waiting thread was woken and acquired the permit
-    SEMAPHORE_OK_WOKE = 1,
-
-    /// @brief There are no permits available
+    /// @brief No permits are currently available.
     SEMAPHORE_EMPTY = -1,
 
-    /// @brief The semaphore is already full (used for limited capacity semaphores)
+    /// @brief Attempted to release more permits than capacity allows
     SEMAPHORE_FULL = -2,
 
-    /// @brief Failed to initialize the semaphore
+    /// @brief Initialization failed.
     SEMAPHORE_INIT_FAILED = -3,
+
+    /// @brief Semaphore was closed or destroyed while waiting.
+    SEMAPHORE_CLOSED = -4,
+
+    /// @brief Not enough permits available for a multi-permit request.
+    SEMAPHORE_NOT_ENOUGH = -5,
 
 } SEMAPHORE_RESULT;
 
-/// @brief Initialize a semaphore
-/// @param sem Pointer to the semaphore to initialize
-/// @param init_permits Initial number of available permits
-/// @return SEMAPHORE_OK on success, SEMAPHORE_INIT_FAILED on failure
-int semaphore_init(semaphore_t *sem, int init_permits);
+/**
+ * @brief Initialize a semaphore.
+ *
+ * @param sem Pointer to the semaphore to initialize.
+ * @param init_permits Initial number of available permits.
+ * @return SEMAPHORE_OK on success, or SEMAPHORE_INIT_FAILED on error.
+ *
+ * @note `init_permits` must be <= capacity. Once initialized, the semaphore
+ *       may be used concurrently by multiple threads.
+ */
+int semaphore_init(semaphore_t *sem, size_t init_permits);
 
-/// @brief Try to acquire a permit without blocking
-/// @param sem Pointer to the semaphore
-/// @return SEMAPHORE_OK if a permit was acquired,
-///         SEMAPHORE_EMPTY if no permits are available
-int semaphore_acquire(semaphore_t *sem);
+/**
+ * @brief Attempt to acquire multiple permits without blocking.
+ *
+ * @param sem Pointer to the semaphore.
+ * @param count Number of permits requested.
+ * @return SEMAPHORE_OK if successful,
+ *         SEMAPHORE_NOT_ENOUGH if insufficient permits,
+ *         or SEMAPHORE_CLOSED if the semaphore was destroyed.
+ */
+int semaphore_acquire_many(semaphore_t *sem, size_t count);
 
-/// @brief Release a permit back to the semaphore
-///        if there are waiting threads, wakes one of them
-/// @param sem Pointer to the semaphore
-/// @return SEMAPHORE_OK if incremented permits,
-///         SEMAPHORE_OK_WOKE if a waiting thread was woken
-int semaphore_release(semaphore_t *sem);
+/**
+ * @brief Acquire multiple permits, blocking if necessary.
+ *
+ * @param sem Pointer to the semaphore.
+ * @param count Number of permits to acquire.
+ * @return SEMAPHORE_OK on success,
+ *         SEMAPHORE_CLOSED if the semaphore was destroyed.
+ *
+ * @note This function may park the calling thread using a per-thread
+ *       parker until permits become available.
+ */
+int semaphore_acquire_many_block(semaphore_t *sem, size_t count);
 
-/// @brief Acquire a permit, blocking if none are available
-///        will park the calling thread until a permit becomes available
-/// @param sem Pointer to the semaphore
-/// @return SEMAPHORE_OK if the acquired the permit immediately ,
-/// SEMAPHORE_OK_WOKE if acquired by a release call
-int semaphore_acquire_block(semaphore_t *sem);
+/**
+ * @brief Release multiple permits and wake waiters as needed.
+ *
+ * @param sem Pointer to the semaphore.
+ * @param count Number of permits to release.
+ * @return SEMAPHORE_OK on success or SEMAPHORE_FULL if over-released.
+ */
+int semaphore_release_many(semaphore_t *sem, size_t count);
 
-#endif
+/**
+ * @brief Attempt to acquire a single permit without blocking.
+ *
+ * @param sem Pointer to the semaphore.
+ * @return SEMAPHORE_OK if acquired, SEMAPHORE_EMPTY otherwise.
+ */
+static inline int semaphore_acquire(semaphore_t *sem)
+{
+    return semaphore_acquire_many(sem, 1);
+}
+
+/**
+ * @brief Release a single permit back to the semaphore.
+ *
+ * If any thread is waiting, one may be woken.
+ *
+ * @param sem Pointer to the semaphore.
+ */
+static inline void semaphore_release(semaphore_t *sem)
+{
+    semaphore_release_many(sem, 1);
+}
+
+/**
+ * @brief Acquire a single permit, blocking if necessary.
+ *
+ * @param sem Pointer to the semaphore.
+ * @return SEMAPHORE_OK if acquired successfully,
+ *         or SEMAPHORE_CLOSED if destroyed while waiting.
+ */
+static inline int semaphore_acquire_block(semaphore_t *sem)
+{
+    return semaphore_acquire_many_block(sem, 1);
+}
+
+/**
+ * @brief Destroy a semaphore.
+ *
+ * Performs the following:
+ *
+ *  1. Marks the semaphore as closed (prevents future acquisitions).
+ *
+ *  2. Wakes all threads currently waiting.
+ *
+ *  3. Releases all internal resources.
+ *
+ * @warning After calling this, `sem` must not be used by any thread.
+ *          Waiters woken by this function should detect closure the return SEMAPHORE_CLOSED.
+ */
+void semaphore_destroy(semaphore_t *sem);
+
+#endif /* SEMAPHORE_H */

@@ -24,17 +24,18 @@ typedef struct
 #define CPU_HINT_LOOP() __asm__ __volatile__("" ::: "memory")
 #endif
 
-static inline void spin_next(spin_t *spin)
+static inline int spin_next(spin_t *spin)
 {
-    if (spin->next == spin->max)
+    if (spin->next > spin->max)
     {
-        spin->next = spin->max;
+        return TRUE;
     }
     for (int i = 0; i < (spin->next ^ spin->pow); i++)
     {
         CPU_HINT_LOOP();
     }
     spin->next += 1;
+    return FALSE;
 }
 
 #endif

@@ -4,34 +4,42 @@
 #include "semaphore.h"
 #include "unistd.h"
 #define NUM_THREADS 32
-#define INITIAL_PERMITS 1
+#define INITIAL_PERMITS 7
 
-semaphore_t sem;
+semaphore_t *sem;
 
 void *worker(void *arg)
 {
     int id = *(int *)arg;
 
     printf("Thread %d: trying to acquire semaphore...\n", id);
-    semaphore_acquire_block(&sem);
-    printf("Thread %d: acquired semaphore!\n", id);
+    if (semaphore_acquire_many_block(sem, 2) == SEMAPHORE_CLOSED)
+    {
+        printf("Thread %d: waking up by semaphore close\n", id);
+    }
+    else
+    {
+        printf("Thread %d: acquired semaphore!\n", id);
+        usleep(100000); // 100ms
 
-    // simulate some work
-    usleep(100000); // 100ms
+        printf("Thread %d: releasing semaphore\n", id);
+        semaphore_release_many(sem, 2);
+    }
 
-    printf("Thread %d: releasing semaphore\n", id);
-    semaphore_release(&sem);
     return NULL;
 }
 
 int main()
 {
+    sem = malloc(sizeof(semaphore_t));
+
     pthread_t threads[NUM_THREADS];
     int ids[NUM_THREADS];
 
     // initialize semaphore with INITIAL_PERMITS
-    if (semaphore_init(&sem, INITIAL_PERMITS) != SEMAPHORE_OK)
+    if (semaphore_init(sem, INITIAL_PERMITS) != SEMAPHORE_OK)
     {
+
         fprintf(stderr, "Failed to initialize semaphore\n");
         return 1;
     }
@@ -47,6 +55,8 @@ int main()
         }
     }
 
+    //  usleep(350000);
+    //  semaphore_destroy(sem);
     // wait for threads
     for (int i = 0; i < NUM_THREADS; i++)
     {

@@ -47,3 +47,13 @@ cmake_install.cmake
 .vscode/
 .idea/
 *.code-workspace
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# macOS folder attributes
+.Spotlight-V100
+.Trashes
+._*
+*.DS_Store

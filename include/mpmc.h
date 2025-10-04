@@ -11,6 +11,7 @@ typedef enum
     MPMC_INIT_FAILED = -3,
 
 } MPMC_RESULT;
+// TODO -> proper align
 typedef struct
 {
     atomic_size_t seq;    // sequence number
@@ -24,7 +25,9 @@ typedef struct
     size_t item_size;
     int capacity;
     parker_t recv_parker;
+    atomic_size_t recv_waiting;
     parker_t send_parker;
+    atomic_size_t send_waiting;
 } mpmc_t;
 /**
  * @brief Receive a message from the MPMC queue (non-blocking).
@@ -68,9 +71,8 @@ int mpmc_init(mpmc_t *queue, int capacity, int item_size);
 /**
  * @brief Enqueues a message into the MPMC queue.
  *
- * This function will block the calling thread if the queue is full,
- * until space becomes available. It uses a parker internally to
- * efficiently wait without busy-waiting.
+ * This function will wait the calling thread if the queue is full,
+ * until space becomes available.
  *
  * @param queue Pointer to an initialized MPMC queue.
  * @param message Pointer to the message to enqueue. Must be at least
@@ -84,9 +86,8 @@ int mpmc_send_block(mpmc_t *queue, void *message);
 /**
  * @brief Dequeues a message from the MPMC queue.
  *
- * This function will block the calling thread if the queue is empty,
- * until a message becomes available. It uses a parker internally to
- * efficiently wait without busy-waiting.
+ * This function will wait the calling thread if the queue is empty,
+ * until a message becomes available.
  *
  * @param queue Pointer to an initialized MPMC queue.
  * @param message Pointer to the buffer to store the dequeued message.
